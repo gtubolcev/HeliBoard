@@ -22,6 +22,18 @@ android {
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
 
+    signingConfigs {
+        // Fixed key committed to the fork so CI debug builds of the Phone Whisper edition
+        // install over each other (the default debug key differs on every CI runner).
+        create("phoneWhisperDebug") {
+            storeFile = file("phonewhisper-debug.p12")
+            storePassword = "heliboard-phonewhisper-debug"
+            keyAlias = "debug"
+            keyPassword = "heliboard-phonewhisper-debug"
+            storeType = "pkcs12"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -41,6 +53,7 @@ android {
             isMinifyEnabled = true
             isJniDebuggable = false
             applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("phoneWhisperDebug")
         }
         create("runTests") { // build variant for running tests on CI that skips tests known to fail
             isMinifyEnabled = false

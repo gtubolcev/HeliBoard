@@ -63,5 +63,14 @@
             android:minWidth="0dp"
             style="?attr/suggestionWordStyle">
         </LinearLayout>
+        <!-- Phone Whisper voice buttons, always visible at the right -->
+        <LinearLayout
+            android:id="@+id/phone_whisper_keys"
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_weight="0"
+            android:gravity="center_vertical"
+            android:paddingEnd="2dp" />
     </LinearLayout>
 </merge>

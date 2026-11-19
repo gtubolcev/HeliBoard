@@ -13,6 +13,15 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WRITE_USER_DICTIONARY" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Phone Whisper voice buttons: record here, transcribe in the Phone Whisper app -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="com.kafkasl.phonewhisper.permission.DICTATION" />
+
+    <queries>
+        <intent>
+            <action android:name="com.kafkasl.phonewhisper.action.BIND_DICTATION" />
+        </intent>
+    </queries>
 
     <application android:label="@string/english_ime_name"
             android:name="helium314.keyboard.latin.App"
@@ -85,6 +94,12 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
                 <action android:name="android.intent.action.MAIN" />
             </intent-filter>
         </activity>
+
+        <activity android:name="helium314.keyboard.latin.phonewhisper.PhoneWhisperPermissionActivity"
+            android:exported="false"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity android:name="helium314.keyboard.keyboard.emoji.EmojiSearchActivity" android:exported="false"
             android:theme="@style/TransparentActivityTheme" android:excludeFromRecents="true" android:noHistory="true"

@@ -7,6 +7,7 @@
 package helium314.keyboard.latin;
 
 import android.app.AlertDialog;
+import helium314.keyboard.latin.phonewhisper.PhoneWhisperVoice;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -117,6 +118,25 @@ public class LatinIME extends InputMethodService implements
 
     // TODO: Move these {@link View}s to {@link KeyboardSwitcher}.
     private SuggestionStripView mSuggestionStripView;
+
+    // Phone Whisper voice buttons in the suggestion strip (transcription runs in the Phone Whisper app)
+    private final PhoneWhisperVoice mPhoneWhisper = new PhoneWhisperVoice(this, new PhoneWhisperVoice.Host() {
+        @NonNull
+        @Override
+        public RichInputConnection getVoiceConnection() {
+            return mInputLogic.mConnection;
+        }
+
+        @Override
+        public void voiceFinishTyping() {
+            mInputLogic.finishInput();
+        }
+
+        @Override
+        public void voiceTextChanged() {
+            mKeyboardSwitcher.updateShiftState(getCurrentAutoCapsState(), getCurrentRecapitalizeState());
+        }
+    });
 
     private RichInputMethodManager mRichImm;
     final KeyboardSwitcher mKeyboardSwitcher;
@@ -614,6 +634,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onDestroy() {
+        mPhoneWhisper.onDestroy();
         mClipboardHistoryManager.onDestroy();
         mDictionaryFacilitator.closeDictionaries();
         mSettings.onDestroy();
@@ -686,6 +707,9 @@ public class LatinIME extends InputMethodService implements
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setRtl(mRichImm.getCurrentSubtype().isRtlSubtype());
             mSuggestionStripView.setListener(this, view);
+            mPhoneWhisper.attach(mSuggestionStripView.getPhoneWhisperKeys());
+        } else {
+            mPhoneWhisper.attach(null);
         }
     }
 
@@ -772,6 +796,7 @@ public class LatinIME extends InputMethodService implements
 
     void onStartInputViewInternal(EditorInfo editorInfo, boolean restarting) {
         super.onStartInputView(editorInfo, restarting);
+        mPhoneWhisper.onStartInputView();
 
         setGestureDataGatheringMode(editorInfo, restarting);
 
@@ -943,6 +968,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     void onFinishInputViewInternal(final boolean finishingInput) {
+        mPhoneWhisper.onFinishInputView();
         super.onFinishInputView(finishingInput);
         Log.i(TAG, "onFinishInputView");
         cleanupInternalStateForFinishInput();
@@ -1243,6 +1269,7 @@ public class LatinIME extends InputMethodService implements
     // This method is public for testability of LatinIME, but also in the future it should
     // completely replace #onCodeInput.
     public void onEvent(@NonNull final Event event) {
+        if (mPhoneWhisper.interceptKey(event.getCodePoint())) return;
         if (KeyCode.VOICE_INPUT == event.getKeyCode()) {
             mRichImm.switchToShortcutIme(this);
         }
@@ -1254,6 +1281,7 @@ public class LatinIME extends InputMethodService implements
 
     public void onTextInput(@Nullable String rawText) {
         if (rawText == null) return;
+        if (mPhoneWhisper.interceptKey(Constants.NOT_A_CODE)) return;
         // TODO: have the keyboard pass the correct key code when we need it.
         Event event = Event.createSoftwareTextEvent(rawText, KeyCode.MULTIPLE_CODE_POINTS, null);
         InputTransaction completeInputTransaction = mInputLogic.onTextInput(mSettings.getCurrent(),

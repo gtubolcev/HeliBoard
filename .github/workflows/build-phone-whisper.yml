@@ -1,0 +1,51 @@
+name: Build Phone Whisper edition
+
+# Debug APK of this fork (HeliBoard with Phone Whisper voice buttons), published as a
+# pre-release so it can be downloaded on a phone without signing in:
+# https://github.com/<owner>/<repo>/releases/download/build-<branch>/HeliBoard-phone-whisper-debug.apk
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeliBoard-phone-whisper-debug
+          path: app/build/outputs/apk/debug/*-debug*.apk
+
+      - name: Publish APK as a pre-release for this branch
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF_NAME//\//-}"
+          tag="build-$branch"
+          cp app/build/outputs/apk/debug/*-debug*.apk HeliBoard-phone-whisper-debug.apk
+          gh release delete "$tag" --yes --cleanup-tag || true
+          gh release create "$tag" HeliBoard-phone-whisper-debug.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "HeliBoard + Phone Whisper: $GITHUB_REF_NAME" \
+            --notes "Debug build of $GITHUB_REF_NAME at ${GITHUB_SHA::7}. Installs next to regular HeliBoard (helium314.keyboard.debug). Needs the Phone Whisper app."
