@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.SuggestionSpan
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -35,6 +38,8 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         fun voiceFinishTyping()
         /** Text changed under HeliBoard's feet: update shift state. */
         fun voiceTextChanged()
+        /** Whether HeliBoard's dictionaries know [word]; null while no main dictionary is loaded. */
+        fun voiceIsKnownWord(word: String): Boolean?
     }
 
     private enum class State { IDLE, RECORDING, TRANSCRIBING }
@@ -233,7 +238,7 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         captureContext()
         val d = VoiceText.prepareDictation(text, segBefore!!, segAfter!!)
         if (d.insert.isNotEmpty()) {
-            conn.commitText(d.insert, 1)
+            conn.commitText(markUnknownWords(d.insert), 1)
             lastWasPunct = false
         } else {
             conn.finishComposingText()
@@ -277,7 +282,7 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         val trailing = before.length - trimmed.length
         host.voiceFinishTyping()
         conn.deleteTextBeforeCursor(target.length + trailing)
-        conn.commitText(cleaned + " ".repeat(trailing), 1)
+        conn.commitText(markUnknownWords(cleaned + " ".repeat(trailing)), 1)
         host.voiceTextChanged()
     }
 
@@ -295,8 +300,29 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         val d = VoiceText.prepareDictation(text, before, after)
         if (d.insert.isEmpty()) return
         host.voiceFinishTyping()
-        conn.commitText(d.insert, 1)
+        conn.commitText(markUnknownWords(d.insert), 1)
         host.voiceTextChanged() // non-live results were already cleaned up by the engine
+    }
+
+    /**
+     * Underline words HeliBoard's dictionaries do not know, the way a spell checker does
+     * (SuggestionSpan with FLAG_MISSPELLED). Tapping such a word puts the cursor in it and
+     * HeliBoard offers its dictionary suggestions in the strip. Recognizers mostly produce
+     * real words, so this only catches non-words ("маскве"), not wrong real words.
+     */
+    private fun markUnknownWords(text: String): CharSequence {
+        var spannable: SpannableString? = null
+        for (m in WORD.findAll(text)) {
+            val word = m.value
+            if (word.length < 2 || word.any { it.isDigit() }) continue
+            if (word.length > 1 && word.all { !it.isLetter() || it.isUpperCase() }) continue // acronyms
+            val known = host.voiceIsKnownWord(word) ?: return text // no dictionary loaded
+            if (known || host.voiceIsKnownWord(word.lowercase()) == true) continue
+            val span = SuggestionSpan(context, arrayOf(), SuggestionSpan.FLAG_MISSPELLED)
+            (spannable ?: SpannableString(text).also { spannable = it })
+                .setSpan(span, m.range.first, m.range.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return spannable ?: text
     }
 
     private fun flushPunct() {
@@ -390,6 +416,7 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
     private fun toast(res: Int) = Toast.makeText(context, res, Toast.LENGTH_SHORT).show()
 
     companion object {
+        private val WORD = Regex("[\\p{L}\\p{M}]+(?:['’-][\\p{L}\\p{M}]+)*")
         private const val TAP_COLOR = 0xFF2563EB.toInt()
         private const val PTT_COLOR = 0xFF0D9488.toInt()
         private const val REC_COLOR = 0xFFEF4444.toInt()

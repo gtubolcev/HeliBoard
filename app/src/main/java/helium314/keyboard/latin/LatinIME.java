@@ -136,6 +136,13 @@ public class LatinIME extends InputMethodService implements
         public void voiceTextChanged() {
             mKeyboardSwitcher.updateShiftState(getCurrentAutoCapsState(), getCurrentRecapitalizeState());
         }
+
+        @Nullable
+        @Override
+        public Boolean voiceIsKnownWord(@NonNull String word) {
+            if (!mDictionaryFacilitator.hasAtLeastOneInitializedMainDictionary()) return null;
+            return mDictionaryFacilitator.isValidSpellingWord(word);
+        }
     });
 
     private RichInputMethodManager mRichImm;
