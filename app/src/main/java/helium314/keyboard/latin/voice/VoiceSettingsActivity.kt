@@ -484,6 +484,10 @@ class VoiceSettingsActivity : AppCompatActivity() {
             val title = "${VoiceButtons.colorName(b.color)} — ${if (b.pushToTalk) "hold to talk" else "tap to start / stop"}"
             buttonsContainer.addView(settingsRow(title, buttonSummary(b), dot) { editButton(i) })
         }
+        val size = VoiceButtons.sizePercent(this)
+        buttonsContainer.addView(settingsRow("Button size", "${VoiceButtons.sizeName(size)} (of the suggestion strip height)") {
+            chooseSize()
+        })
         if (list.size < VoiceButtons.MAX_BUTTONS) {
             buttonsContainer.addView(settingsRow("Add a button", "Another mic with its own colour and model, e.g. for Chinese") {
                 addButton()
@@ -558,6 +562,20 @@ class VoiceSettingsActivity : AppCompatActivity() {
             .setSingleChoiceItems(names.toTypedArray(), checked) { dialog, which ->
                 updateButton(index) { it.copy(color = VoiceButtons.PALETTE[which].second) }
                 dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun chooseSize() {
+        val current = VoiceButtons.sizePercent(this)
+        val labels = VoiceButtons.SIZES.map { "${it.first} — ${it.second}%" }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Button size")
+            .setSingleChoiceItems(labels.toTypedArray(), VoiceButtons.SIZES.indexOfFirst { it.second == current }) { dialog, which ->
+                VoiceButtons.setSizePercent(this, VoiceButtons.SIZES[which].second)
+                dialog.dismiss()
+                refresh()
             }
             .setNegativeButton("Cancel", null)
             .show()

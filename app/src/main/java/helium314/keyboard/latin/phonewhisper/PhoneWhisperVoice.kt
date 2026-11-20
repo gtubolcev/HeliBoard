@@ -195,7 +195,8 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) {
         c.removeAllViews()
         views.clear()
         buttons = VoiceButtons.load(context).filter { VoiceButtons.isUsable(context, it) }
-        val size = (context.resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) * 0.74f).toInt()
+        val size = context.resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) *
+            VoiceButtons.sizePercent(context) / 100
         for (b in buttons) {
             val v = micButton(b)
             if (b.pushToTalk) v.pushToTalk(b) else v.setOnClickListener { it.haptic(); onTap(b) }
@@ -389,7 +390,9 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) {
         }
         return FrameLayout(context).apply {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(b.color) }
-            val pad = (resources.displayMetrics.density * 6).toInt()
+            // Icon padding scales with the button so small buttons keep a visible mic.
+            val strip = resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height)
+            val pad = strip * VoiceButtons.sizePercent(context) / 100 / 6
             setPadding(pad, pad, pad, pad)
             addView(icon, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             isClickable = true

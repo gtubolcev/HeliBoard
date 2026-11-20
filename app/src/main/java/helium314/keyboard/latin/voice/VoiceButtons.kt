@@ -21,6 +21,21 @@ data class VoiceButton(
 object VoiceButtons {
     const val PREF = "voice_buttons"
     const val MAX_BUTTONS = 5
+    const val SIZE_PREF = "voice_button_size"
+    /** Button diameter in percent of the suggestion strip height. */
+    val SIZES: List<Pair<String, Int>> = listOf(
+        "Extra small" to 50, "Small" to 62, "Medium" to 74, "Large" to 86, "Full height" to 100,
+    )
+    const val DEFAULT_SIZE = 74
+
+    fun sizePercent(context: Context): Int =
+        prefs(context).getInt(SIZE_PREF, DEFAULT_SIZE).coerceIn(30, 100)
+
+    fun setSizePercent(context: Context, percent: Int) {
+        prefs(context).edit().putInt(SIZE_PREF, percent).apply()
+    }
+
+    fun sizeName(percent: Int): String = SIZES.firstOrNull { it.second == percent }?.first ?: "$percent%"
 
     /** Colours offered for buttons (name to ARGB). Red and grey are the recording / busy states. */
     val PALETTE: List<Pair<String, Int>> = listOf(
