@@ -1323,13 +1323,12 @@ New dictionary:
 
     <!-- new strings should go above the section for gesture data gathering -->
     <!-- Phone Whisper voice buttons -->
-    <string name="phone_whisper_mic" translatable="false">Dictate (Phone Whisper)</string>
-    <string name="phone_whisper_ptt" translatable="false">Hold to talk (Phone Whisper)</string>
-    <string name="phone_whisper_not_installed" translatable="false">Install the Phone Whisper app to dictate</string>
-    <string name="phone_whisper_connecting" translatable="false">Connecting to Phone Whisper… tap again</string>
+    <string name="phone_whisper_mic" translatable="false">Dictate (long-press: voice settings)</string>
+    <string name="phone_whisper_ptt" translatable="false">Hold to talk</string>
     <string name="phone_whisper_mic_error" translatable="false">Microphone is unavailable</string>
-    <string name="phone_whisper_cleanup_no_key" translatable="false">Cleanup needs an API key in Phone Whisper</string>
+    <string name="phone_whisper_cleanup_no_key" translatable="false">Cleanup needs an API key (voice settings)</string>
     <string name="phone_whisper_cleanup_failed" translatable="false">Cleanup failed — raw text kept</string>
     <string name="phone_whisper_permissions_granted" translatable="false">Ready — tap the mic again</string>
-    <string name="phone_whisper_permissions_denied" translatable="false">Dictation needs the microphone and Phone Whisper permissions</string>
+    <string name="phone_whisper_permissions_denied" translatable="false">Dictation needs the microphone permission</string>
+    <string name="voice_settings_title" translatable="false">Voice input</string>
 </resources>

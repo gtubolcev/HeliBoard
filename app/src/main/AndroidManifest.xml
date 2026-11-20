@@ -13,15 +13,9 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WRITE_USER_DICTIONARY" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
-    <!-- Phone Whisper voice buttons: record here, transcribe in the Phone Whisper app -->
+    <!-- Voice buttons: built-in dictation (local models, optional cloud transcription/cleanup) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="com.kafkasl.phonewhisper.permission.DICTATION" />
-
-    <queries>
-        <intent>
-            <action android:name="com.kafkasl.phonewhisper.action.BIND_DICTATION" />
-        </intent>
-    </queries>
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application android:label="@string/english_ime_name"
             android:name="helium314.keyboard.latin.App"
@@ -94,6 +88,11 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
                 <action android:name="android.intent.action.MAIN" />
             </intent-filter>
         </activity>
+
+        <activity android:name="helium314.keyboard.latin.voice.VoiceSettingsActivity"
+            android:exported="true"
+            android:label="@string/voice_settings_title"
+            android:theme="@style/Theme.VoiceSettings" />
 
         <activity android:name="helium314.keyboard.latin.phonewhisper.PhoneWhisperPermissionActivity"
             android:exported="false"

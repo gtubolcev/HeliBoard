@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package helium314.keyboard.latin.phonewhisper
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.SuggestionSpan
@@ -17,19 +21,25 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.RichInputConnection
-import helium314.keyboard.latin.phonewhisper.RemoteProtocol as P
+import helium314.keyboard.latin.voice.DictationEngine
+import helium314.keyboard.latin.voice.ImeLog
+import helium314.keyboard.latin.voice.VoiceButton
+import helium314.keyboard.latin.voice.VoiceButtons
+import helium314.keyboard.latin.voice.VoiceSettingsActivity
 
 /**
- * Two small voice buttons in the suggestion strip, backed by the Phone Whisper app:
- * a blue tap-to-toggle mic and a teal push-to-talk mic; each uses the model chosen for it
- * in Phone Whisper (push-to-talk: streaming, or an offline model phrase by phrase).
- * With a streaming model text is typed live as composing text and committed at each
- * pause; punctuation keys pressed while speaking close the current piece and place
- * the mark after it (smart punctuation), any other key ends dictation.
+ * Voice buttons in the suggestion strip, backed by the built-in dictation engine (from
+ * Phone Whisper). Each button has its own colour, mode (tap to toggle / push-to-talk) and
+ * model, configured in the voice settings (long-press any button). With a streaming model,
+ * or an offline model on a push-to-talk button (pseudo-streaming by pauses), text is typed
+ * live: the current piece as composing text, committed at each pause. Punctuation keys
+ * pressed while speaking close the current piece and place the mark after it; any other
+ * key ends dictation.
  */
-class PhoneWhisperVoice(private val context: Context, private val host: Host) : PhoneWhisperClient.Events {
+class PhoneWhisperVoice(private val context: Context, private val host: Host) {
 
     /** What the voice buttons need from LatinIME. */
     interface Host {
@@ -45,15 +55,14 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
 
     private enum class State { IDLE, RECORDING, TRANSCRIBING }
 
-    private val client = PhoneWhisperClient(context, this)
-    private var tapButton: FrameLayout? = null
-    private var pttButton: FrameLayout? = null
+    private val main = Handler(Looper.getMainLooper())
+    private var container: ViewGroup? = null
+    private val views = LinkedHashMap<String, FrameLayout>()
+    private var buttons: List<VoiceButton> = emptyList()
 
     private var state = State.IDLE
-    private var pttActive = false
-    private var streaming = false
-    private var micButtons = "both"
-    private var cleanupEnabled = false
+    /** Button that started the current utterance. */
+    private var active: VoiceButton? = null
 
     private var liveActive = false
     private val liveText = StringBuilder()
@@ -62,44 +71,101 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
     private val pendingPunct = mutableListOf<Char>()
     private var lastWasPunct = false
     private var cleanupId = 0
-    private var cleanupTarget: String? = null
 
     private val conn get() = host.voiceConnection
+
+    private val listener = object : DictationEngine.Listener {
+        override fun onStateChanged(state: DictationEngine.State) {
+            this@PhoneWhisperVoice.state = when (state) {
+                DictationEngine.State.RECORDING -> State.RECORDING
+                DictationEngine.State.TRANSCRIBING -> State.TRANSCRIBING
+                DictationEngine.State.IDLE -> State.IDLE
+            }
+            if (state == DictationEngine.State.RECORDING) liveActive = DictationEngine.isLive
+            render()
+        }
+
+        override fun onLevel(level: Float) {
+            val v = active?.let { views[it.id] } ?: return
+            val s = 1f + level * 0.15f
+            v.scaleX = s
+            v.scaleY = s
+        }
+
+        override fun onLivePartial(text: String) {
+            if (!liveActive) return
+            captureContext()
+            conn.setComposingText(VoiceText.prepareDictation(text, segBefore!!, segAfter!!).insert, 1)
+        }
+
+        override fun onLiveSegment(text: String, forced: Boolean) {
+            if (!liveActive) return
+            captureContext()
+            val d = VoiceText.prepareDictation(text, segBefore!!, segAfter!!)
+            if (d.insert.isNotEmpty()) {
+                conn.commitText(markUnknownWords(d.insert), 1)
+                lastWasPunct = false
+            } else {
+                conn.finishComposingText()
+            }
+            liveText.append(d.insert)
+            segBefore = null
+            segAfter = null
+            flushPunct()
+            host.voiceTextChanged()
+        }
+
+        override fun onResult(text: String, notice: DictationEngine.Notice) {
+            if (liveActive) {
+                val typed = finishLive()
+                if (DictationEngine.isCleanupEnabled() && typed.isNotBlank()) requestCleanup(typed)
+            } else {
+                insert(text)
+            }
+            noticeToast(notice)
+            active = null
+            render()
+        }
+
+        override fun onError(message: String) {
+            if (liveActive) finishLive()
+            active = null
+            render()
+            if (message.isNotBlank()) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // --- Wiring from LatinIME ---
 
     /** Put the buttons into the (re)created suggestion strip. */
     fun attach(container: ViewGroup?) {
-        tapButton = null
-        pttButton = null
-        container ?: return
-        container.removeAllViews()
-        val size = (context.resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) * 0.78f).toInt()
-        tapButton = micButton(TAP_COLOR, R.string.phone_whisper_mic).also { b ->
-            b.setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); onTap() }
-            container.addView(b, buttonParams(size))
-        }
-        pttButton = micButton(PTT_COLOR, R.string.phone_whisper_ptt).also { b ->
-            b.pushToTalk()
-            container.addView(b, buttonParams(size))
-        }
-        render()
+        this.container = container
+        rebuild()
     }
 
     fun onStartInputView() {
-        client.connect()
-        render()
+        DictationEngine.attach(context)
+        ImeLog.init(context)
+        rebuild() // settings may have changed
+        // Warm the models of the visible buttons; they are released after idling.
+        for (b in buttons) {
+            val model = VoiceButtons.resolveModel(context, b) ?: continue
+            DictationEngine.ensureLoaded(model)
+        }
+        DictationEngine.scheduleModelRelease()
     }
 
     fun onFinishInputView() {
-        if (state != State.IDLE) client.cancel()
+        if (state != State.IDLE) DictationEngine.cancel(listener)
         if (liveActive) finishLive()
         state = State.IDLE
-        pttActive = false
+        active = null
         render()
     }
 
-    fun onDestroy() = client.disconnect()
+    fun onDestroy() {
+        if (state != State.IDLE) DictationEngine.cancel(listener)
+    }
 
     /**
      * Called for every key before HeliBoard handles it. Returns true if the key was consumed:
@@ -109,7 +175,7 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         if (state == State.RECORDING) {
             if (liveActive && codePoint > 0 && codePoint.toChar() in VoiceText.SMART_MARKS) {
                 pendingPunct.add(codePoint.toChar())
-                client.cut()
+                if (!DictationEngine.cutSegment()) flushPunct()
                 return true
             }
             stop()
@@ -124,25 +190,41 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
 
     // --- Buttons ---
 
-    private fun onTap() {
+    private fun rebuild() {
+        val c = container ?: return
+        c.removeAllViews()
+        views.clear()
+        buttons = VoiceButtons.load(context).filter { VoiceButtons.isUsable(context, it) }
+        val size = (context.resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) * 0.74f).toInt()
+        for (b in buttons) {
+            val v = micButton(b)
+            if (b.pushToTalk) v.pushToTalk(b) else v.setOnClickListener { it.haptic(); onTap(b) }
+            v.setOnLongClickListener { openSettings(); true }
+            c.addView(v, buttonParams(size))
+            views[b.id] = v
+        }
+        render()
+    }
+
+    private fun onTap(b: VoiceButton) {
         when (state) {
-            State.IDLE -> start(ptt = false)
+            State.IDLE -> start(b)
             State.RECORDING -> stop()
             State.TRANSCRIBING -> {}
         }
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun View.pushToTalk() {
+    private fun View.pushToTalk(b: VoiceButton) {
         setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    if (state == State.IDLE) start(ptt = true)
+                    v.haptic()
+                    if (state == State.IDLE) start(b)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (pttActive && state == State.RECORDING) stop()
+                    if (active?.id == b.id && state == State.RECORDING) stop()
                     true
                 }
                 else -> true
@@ -150,20 +232,11 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         }
     }
 
-    private fun start(ptt: Boolean) {
-        if (client.findService() == null) {
-            toast(R.string.phone_whisper_not_installed)
-            return
-        }
-        if (client.missingPermissions().isNotEmpty()) {
+    private fun start(b: VoiceButton) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             context.startActivity(
                 Intent(context, PhoneWhisperPermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-            return
-        }
-        if (!client.isConnected) {
-            client.connect()
-            toast(R.string.phone_whisper_connecting)
             return
         }
         host.voiceFinishTyping()
@@ -173,118 +246,25 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         segAfter = null
         pendingPunct.clear()
         lastWasPunct = false
-        if (!client.start(live = true, cleanup = true, ptt = ptt)) {
-            toast(R.string.phone_whisper_mic_error)
-            return
+        active = b
+        val role = if (b.pushToTalk) DictationEngine.Role.PTT else DictationEngine.Role.TAP
+        val explicit = b.model.takeIf { it.isNotBlank() }?.let { VoiceButtons.resolveModel(context, b) }
+        when (DictationEngine.start(listener, cleanup = true, live = true, role = role, model = explicit)) {
+            DictationEngine.StartResult.STARTED -> {}
+            DictationEngine.StartResult.NO_PERMISSION -> { active = null; toast(R.string.phone_whisper_permissions_denied) }
+            DictationEngine.StartResult.MIC_ERROR -> { active = null; toast(R.string.phone_whisper_mic_error) }
+            DictationEngine.StartResult.BUSY -> { active = null }
         }
-        pttActive = ptt
-        state = State.RECORDING
         render()
     }
 
     private fun stop() {
         if (state != State.RECORDING) return
-        client.stop()
-        state = State.TRANSCRIBING
-        render()
+        DictationEngine.stopAndTranscribe()
     }
 
-    // --- Engine events ---
-
-    override fun onConnectionChanged(connected: Boolean) {
-        if (!connected) {
-            if (liveActive) finishLive()
-            state = State.IDLE
-            pttActive = false
-        }
-        render()
-    }
-
-    override fun onInfo(streaming: Boolean, micButtons: String, cleanup: Boolean) {
-        this.streaming = streaming
-        this.micButtons = micButtons
-        this.cleanupEnabled = cleanup
-        render()
-    }
-
-    override fun onStarted(live: Boolean) {
-        liveActive = live
-    }
-
-    override fun onState(state: String) {
-        this.state = when (state) {
-            "RECORDING" -> State.RECORDING
-            "TRANSCRIBING" -> State.TRANSCRIBING
-            else -> State.IDLE
-        }
-        if (this.state == State.IDLE) pttActive = false
-        render()
-    }
-
-    override fun onLevel(level: Float) {
-        val b = (if (pttActive) pttButton else tapButton) ?: return
-        val s = 1f + level * 0.15f
-        b.scaleX = s
-        b.scaleY = s
-    }
-
-    override fun onPartial(text: String) {
-        if (!liveActive) return
-        captureContext()
-        conn.setComposingText(VoiceText.prepareDictation(text, segBefore!!, segAfter!!).insert, 1)
-    }
-
-    override fun onSegment(text: String, forced: Boolean) {
-        if (!liveActive) return
-        captureContext()
-        val d = VoiceText.prepareDictation(text, segBefore!!, segAfter!!)
-        if (d.insert.isNotEmpty()) {
-            conn.commitText(markUnknownWords(d.insert), 1)
-            lastWasPunct = false
-        } else {
-            conn.finishComposingText()
-        }
-        liveText.append(d.insert)
-        segBefore = null
-        segAfter = null
-        flushPunct()
-        host.voiceTextChanged()
-    }
-
-    override fun onResult(text: String, notice: String) {
-        if (liveActive) {
-            val typed = finishLive()
-            if (cleanupEnabled && typed.isNotBlank()) requestCleanup(typed)
-        } else {
-            insert(text)
-        }
-        noticeToast(notice)
-    }
-
-    override fun onError(message: String, code: String?) {
-        if (liveActive) finishLive()
-        state = State.IDLE
-        pttActive = false
-        render()
-        if (message.isNotBlank()) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-    }
-
-    override fun onCleaned(id: Int, text: String, notice: String) {
-        val target = cleanupTarget
-        if (id != cleanupId || target == null) return
-        cleanupTarget = null
-        noticeToast(notice)
-        val cleaned = text.trim()
-        if (cleaned.isEmpty() || cleaned == target || state != State.IDLE) return
-        // Only swap if the cursor is still right after the dictated text.
-        val before = conn.getTextBeforeCursor(target.length + 2, 0)?.toString() ?: return
-        val trimmed = before.trimEnd(' ')
-        if (!trimmed.endsWith(target)) return
-        val trailing = before.length - trimmed.length
-        host.voiceFinishTyping()
-        conn.deleteTextBeforeCursor(target.length + trailing)
-        conn.commitText(markUnknownWords(cleaned + " ".repeat(trailing)), 1)
-        host.voiceTextChanged()
+    private fun openSettings() {
+        context.startActivity(Intent(context, VoiceSettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     // --- Text ---
@@ -316,7 +296,7 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         for (m in WORD.findAll(text)) {
             val word = m.value
             if (word.length < 2 || word.any { it.isDigit() }) continue
-            if (word.length > 1 && word.all { !it.isLetter() || it.isUpperCase() }) continue // acronyms
+            if (word.all { !it.isLetter() || it.isUpperCase() }) continue // acronyms
             val known = host.voiceIsKnownWord(word) ?: return text // no dictionary loaded
             if (known || host.voiceIsKnownWord(word.lowercase()) == true) continue
             val span = SuggestionSpan(context, arrayOf(), SuggestionSpan.FLAG_MISSPELLED)
@@ -353,73 +333,85 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         return liveText.toString().trim()
     }
 
-    private fun requestCleanup(typed: String) {
-        cleanupTarget = typed
-        client.cleanup(++cleanupId, typed)
+    /** Clean up the live-typed phrase with the LLM and swap it in if the cursor is still after it. */
+    private fun requestCleanup(target: String) {
+        val id = ++cleanupId
+        DictationEngine.cleanup(target) { cleaned, notice ->
+            main.post {
+                if (id != cleanupId) return@post
+                noticeToast(notice)
+                val text = cleaned.trim()
+                if (text.isEmpty() || text == target || state != State.IDLE) return@post
+                val before = conn.getTextBeforeCursor(target.length + 2, 0)?.toString() ?: return@post
+                val trimmed = before.trimEnd(' ')
+                if (!trimmed.endsWith(target)) return@post
+                val trailing = before.length - trimmed.length
+                host.voiceFinishTyping()
+                conn.deleteTextBeforeCursor(target.length + trailing)
+                conn.commitText(markUnknownWords(text + " ".repeat(trailing)), 1)
+                host.voiceTextChanged()
+            }
+        }
     }
 
-    private fun noticeToast(notice: String) {
+    private fun noticeToast(notice: DictationEngine.Notice) {
         when (notice) {
-            P.NOTICE_CLEANUP_NO_KEY -> toast(R.string.phone_whisper_cleanup_no_key)
-            P.NOTICE_CLEANUP_FAILED -> toast(R.string.phone_whisper_cleanup_failed)
+            DictationEngine.Notice.CLEANUP_NO_KEY -> toast(R.string.phone_whisper_cleanup_no_key)
+            DictationEngine.Notice.CLEANUP_FAILED -> toast(R.string.phone_whisper_cleanup_failed)
+            DictationEngine.Notice.NONE -> {}
         }
     }
 
     // --- Rendering ---
 
     private fun render() {
-        val tap = tapButton ?: return
-        val ptt = pttButton ?: return
-        val installed = client.findService() != null
-        val showPtt = installed && streaming && (micButtons == "ptt" || micButtons == "both")
-        val showTap = installed && (!showPtt || micButtons != "ptt")
-        tap.visibility = if (showTap) View.VISIBLE else View.GONE
-        ptt.visibility = if (showPtt) View.VISIBLE else View.GONE
-        paint(tap, TAP_COLOR, active = !pttActive)
-        paint(ptt, PTT_COLOR, active = pttActive)
-    }
-
-    private fun paint(button: FrameLayout, idle: Int, active: Boolean) {
-        val color = when {
-            !active || state == State.IDLE -> idle
-            state == State.RECORDING -> REC_COLOR
-            else -> BUSY_COLOR
-        }
-        (button.background as? GradientDrawable)?.setColor(color)
-        if (!active || state != State.RECORDING) {
-            button.scaleX = 1f
-            button.scaleY = 1f
+        for (b in buttons) {
+            val v = views[b.id] ?: continue
+            val isActive = active?.id == b.id
+            val color = when {
+                !isActive || state == State.IDLE -> b.color
+                state == State.RECORDING -> REC_COLOR
+                else -> BUSY_COLOR
+            }
+            (v.background as? GradientDrawable)?.setColor(color)
+            if (!isActive || state != State.RECORDING) {
+                v.scaleX = 1f
+                v.scaleY = 1f
+            }
         }
     }
 
-    private fun micButton(color: Int, desc: Int): FrameLayout {
+    private fun micButton(b: VoiceButton): FrameLayout {
         val icon = ImageView(context).apply {
             setImageResource(R.drawable.sym_keyboard_voice_rounded)
             setColorFilter(0xFFFFFFFF.toInt())
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
         return FrameLayout(context).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(b.color) }
             val pad = (resources.displayMetrics.density * 6).toInt()
             setPadding(pad, pad, pad, pad)
             addView(icon, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             isClickable = true
-            contentDescription = context.getString(desc)
+            isLongClickable = true
+            contentDescription = context.getString(if (b.pushToTalk) R.string.phone_whisper_ptt else R.string.phone_whisper_mic)
         }
     }
 
     private fun buttonParams(size: Int) = LinearLayout.LayoutParams(size, size).apply {
         gravity = Gravity.CENTER_VERTICAL
-        val m = (context.resources.displayMetrics.density * 3).toInt()
+        val m = (context.resources.displayMetrics.density * 2.5f).toInt()
         setMargins(m, 0, m, 0)
+    }
+
+    private fun View.haptic() {
+        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
     }
 
     private fun toast(res: Int) = Toast.makeText(context, res, Toast.LENGTH_SHORT).show()
 
     companion object {
         private val WORD = Regex("[\\p{L}\\p{M}]+(?:['’-][\\p{L}\\p{M}]+)*")
-        private const val TAP_COLOR = 0xFF2563EB.toInt()
-        private const val PTT_COLOR = 0xFF0D9488.toInt()
         private const val REC_COLOR = 0xFFEF4444.toInt()
         private const val BUSY_COLOR = 0xFF8A9099.toInt()
     }

@@ -12,3 +12,11 @@
 # after upgrading to gradle 8, stack traces contain "unknown source"
 -keepattributes SourceFile,LineNumberTable
 -dontobfuscate
+
+# Voice dictation (sherpa-onnx): native code reads config fields and calls classes by name
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-dontwarn org.apache.commons.compress.**
+-dontwarn org.brotli.dec.**
+-dontwarn com.github.luben.zstd.**
+-dontwarn org.tukaani.xz.**
+-dontwarn org.objectweb.asm.**
