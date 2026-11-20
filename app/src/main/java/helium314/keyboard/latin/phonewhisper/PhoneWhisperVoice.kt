@@ -23,7 +23,8 @@ import helium314.keyboard.latin.phonewhisper.RemoteProtocol as P
 
 /**
  * Two small voice buttons in the suggestion strip, backed by the Phone Whisper app:
- * a blue tap-to-toggle mic and a teal push-to-talk mic (shown with a streaming model).
+ * a blue tap-to-toggle mic and a teal push-to-talk mic; each uses the model chosen for it
+ * in Phone Whisper (push-to-talk: streaming, or an offline model phrase by phrase).
  * With a streaming model text is typed live as composing text and committed at each
  * pause; punctuation keys pressed while speaking close the current piece and place
  * the mark after it (smart punctuation), any other key ends dictation.
@@ -172,7 +173,7 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) : 
         segAfter = null
         pendingPunct.clear()
         lastWasPunct = false
-        if (!client.start(live = true, cleanup = true)) {
+        if (!client.start(live = true, cleanup = true, ptt = ptt)) {
             toast(R.string.phone_whisper_mic_error)
             return
         }

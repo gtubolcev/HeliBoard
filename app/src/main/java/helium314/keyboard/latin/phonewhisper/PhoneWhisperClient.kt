@@ -105,9 +105,14 @@ class PhoneWhisperClient(private val context: Context, private val events: Event
     }
 
     /** Start an utterance and the microphone. False if not connected or the mic is unavailable. */
-    fun start(live: Boolean, cleanup: Boolean): Boolean {
+    /** [ptt]: push-to-talk, which uses its own (streaming / pseudo-streaming) model in Phone Whisper. */
+    fun start(live: Boolean, cleanup: Boolean, ptt: Boolean): Boolean {
         if (service == null) return false
-        send(P.MSG_START) { putBoolean(P.KEY_LIVE, live); putBoolean(P.KEY_CLEANUP, cleanup) }
+        send(P.MSG_START) {
+            putBoolean(P.KEY_LIVE, live)
+            putBoolean(P.KEY_CLEANUP, cleanup)
+            putString(P.KEY_ROLE, if (ptt) P.ROLE_PTT else P.ROLE_TAP)
+        }
         if (!startRecording()) {
             send(P.MSG_CANCEL)
             return false
