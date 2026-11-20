@@ -60,6 +60,17 @@ fun MainSettingsScreen(
                     onClick = onClickLanguage,
                     icon = R.drawable.ic_settings_languages
                 ) { NextScreenIcon() }
+                val voiceContext = LocalContext.current
+                Preference(
+                    name = stringResource(R.string.voice_settings_title),
+                    description = stringResource(R.string.voice_settings_summary),
+                    onClick = {
+                        voiceContext.startActivity(
+                            android.content.Intent(voiceContext, helium314.keyboard.latin.voice.VoiceSettingsActivity::class.java)
+                        )
+                    },
+                    icon = R.drawable.sym_keyboard_voice_rounded
+                ) { NextScreenIcon() }
                 Preference(
                     name = stringResource(R.string.settings_screen_preferences),
                     onClick = onClickPreferences,

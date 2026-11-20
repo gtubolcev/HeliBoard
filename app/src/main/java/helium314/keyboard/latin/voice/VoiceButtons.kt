@@ -104,7 +104,14 @@ object VoiceButtons {
         else LocalTranscriber.tapModel(context)
     }
 
-    /** Push-to-talk buttons need a local model; tap buttons can always fall back to the cloud. */
-    fun isUsable(context: Context, button: VoiceButton): Boolean =
-        !button.pushToTalk || resolveModel(context, button) != null
+    /**
+     * Whether pressing the button can transcribe: it has a local model, or it is a tap
+     * button on the cloud with a transcription key set.
+     */
+    fun isReady(context: Context, button: VoiceButton): Boolean {
+        if (resolveModel(context, button) != null) return true
+        if (button.pushToTalk) return false // push-to-talk is local only
+        val cloud = !prefs(context).getBoolean("use_local", true)
+        return cloud && OpenAiCompatibleApi.apiKey(prefs(context), OpenAiCompatibleApi.TRANSCRIPTION_API_KEY_PREF).isNotBlank()
+    }
 }

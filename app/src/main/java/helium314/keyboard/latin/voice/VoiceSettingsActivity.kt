@@ -501,7 +501,7 @@ class VoiceSettingsActivity : AppCompatActivity() {
             b.model.isNotBlank() && !isLocalModelInstalled(this, b.model) ->
                 "${LocalTranscriber.displayName(b.model)} is not installed — using automatic: " +
                     (model?.let { describe(it, b) } ?: "none")
-            model == null && b.pushToTalk -> "No local model installed — button hidden"
+            model == null && b.pushToTalk -> "No local model installed — download one below"
             model == null -> "Cloud transcription"
             b.model.isBlank() -> "Automatic: ${describe(model, b)}"
             else -> describe(model, b)

@@ -194,13 +194,13 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) {
         val c = container ?: return
         c.removeAllViews()
         views.clear()
-        buttons = VoiceButtons.load(context).filter { VoiceButtons.isUsable(context, it) }
+        // All configured buttons are shown; one without a usable model opens the settings when used.
+        buttons = VoiceButtons.load(context)
         val size = context.resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) *
             VoiceButtons.sizePercent(context) / 100
         for (b in buttons) {
             val v = micButton(b)
             if (b.pushToTalk) v.pushToTalk(b) else v.setOnClickListener { it.haptic(); onTap(b) }
-            v.setOnLongClickListener { openSettings(); true }
             c.addView(v, buttonParams(size))
             views[b.id] = v
         }
@@ -234,6 +234,11 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) {
     }
 
     private fun start(b: VoiceButton) {
+        if (!VoiceButtons.isReady(context, b)) {
+            toast(R.string.phone_whisper_needs_model)
+            openSettings()
+            return
+        }
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             context.startActivity(
                 Intent(context, PhoneWhisperPermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -396,7 +401,6 @@ class PhoneWhisperVoice(private val context: Context, private val host: Host) {
             setPadding(pad, pad, pad, pad)
             addView(icon, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             isClickable = true
-            isLongClickable = true
             contentDescription = context.getString(if (b.pushToTalk) R.string.phone_whisper_ptt else R.string.phone_whisper_mic)
         }
     }
